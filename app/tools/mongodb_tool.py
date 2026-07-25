@@ -1,14 +1,13 @@
 """
-MongoDB Atlas Tool
+MongoDB Tool
 ---------------------
 Single responsibility: persist and retrieve execution logs from LangGraph.
 One collection:
 
   execution_logs    {job_id, started_at, completed_at, duration_seconds, node_timings, errors}
 
-Real backend: MongoDB Atlas via pymongo (a plain cluster connection
-string in MONGODB_URI -- Atlas is just "MongoDB, hosted", there is no
-Atlas-specific SDK).
+Real backend: MongoDB via pymongo (a plain connection
+string in MONGODB_URI).
 
 Fallback: a local JSON-file store with the identical method signatures,
 used only when MONGODB_URI is unset, for the same offline-demoability
@@ -69,7 +68,7 @@ class _LocalJSONBackend:
             self._write(data)
 
 
-class _AtlasBackend:
+class _MongoBackend:
     def __init__(self):
         from pymongo import MongoClient
         self._client = MongoClient(settings.MONGODB_URI)
@@ -89,11 +88,11 @@ class _AtlasBackend:
         self._db[collection].delete_one({"job_id": job_id})
 
 
-class MongoDBAtlasTool:
+class MongoDBTool:
     def __init__(self):
         if settings.mongo_enabled:
-            self._backend = _AtlasBackend()
-            self._backend_name = "mongodb_atlas"
+            self._backend = _MongoBackend()
+            self._backend_name = "mongodb"
         else:
             self._backend = _LocalJSONBackend()
             self._backend_name = "local_json_fallback"
@@ -116,6 +115,13 @@ class MongoDBAtlasTool:
 
     def get_execution_log(self, job_id: str) -> dict | None:
         return self._backend.get("execution_logs", job_id)
+        
+    # ---- results collection ----
+    def save_results(self, job_id: str, results: dict) -> None:
+        self._backend.upsert("results", job_id, {"job_id": job_id, "results": results})
+        
+    def get_results(self, job_id: str) -> dict | None:
+        return self._backend.get("results", job_id)
 
 
-mongodb_tool = MongoDBAtlasTool()
+mongodb_tool = MongoDBTool()

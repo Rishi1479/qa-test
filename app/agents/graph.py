@@ -54,7 +54,7 @@ def build_workflow():
 
     # Use MongoDBSaver if mongo is enabled, else in-memory checkpointer
     checkpointer = MemorySaver()
-    if mongodb_tool.backend == "mongodb_atlas":
+    if mongodb_tool.backend == "mongodb":
         try:
             from langgraph.checkpoint.mongodb import MongoDBSaver
             mongo_client = mongodb_tool.get_client()

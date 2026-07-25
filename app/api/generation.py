@@ -17,7 +17,8 @@ from app.tools.mongodb_tool import mongodb_tool
 from app.tools.supabase_tool import supabase_tool
 from app.tools.validation_tool import validate_requirements
 from app.database import SessionLocal
-from app.crud.crud import get_job, list_jobs, update_job_status, get_results, delete_job
+from app.crud.crud import get_job, get_document_by_job, list_jobs, update_job_status, delete_job, clear_incremental_data
+from app.models.models import TestCase
 
 router = APIRouter(tags=["generation"])
 
@@ -40,15 +41,18 @@ def generate(req: GenerateRequest):
         if not job:
             raise HTTPException(404, f"Unknown job_id '{req.job_id}'")
 
-        existing = get_results(db, req.job_id)
+        existing_wrapper = mongodb_tool.get_results(req.job_id)
+        existing = existing_wrapper.get("results", {}) if existing_wrapper else {}
         if existing and not req.force_regenerate:
             return {"job_id": req.job_id, "status": "completed", "cached": True, "results": existing}
 
         update_job_status(db, req.job_id, "processing")
+        clear_incremental_data(db, req.job_id)
         
         # Need to extract job details before closing session if we want to use them
-        job_filename = job.filename
-        job_storage_url = job.storage_url
+        doc = get_document_by_job(db, req.job_id)
+        job_filename = doc.filename if doc else "unknown.txt"
+        job_storage_url = doc.storage_path if doc else ""
     started_at = datetime.now(timezone.utc).isoformat()
     t0 = time.time()
 
@@ -120,14 +124,17 @@ def list_jobs_endpoint():
         jobs = list_jobs(db)
         out = []
         for j in jobs:
-            results = get_results(db, j.job_id)
-            cov = (results or {}).get("coverage", {})
+            job_id_str = str(j.id)
+            results_wrapper = mongodb_tool.get_results(job_id_str)
+            results = results_wrapper.get("results", {}) if results_wrapper else {}
+            cov = results.get("coverage", {})
             out.append(JobSummary(
-                job_id=j.job_id,
-                filename=j.filename,
+                job_id=str(j.id),
+                filename=j.document.filename if j.document else "",
                 status=j.status,
                 created_at=j.created_at.isoformat() if j.created_at else "",
                 updated_at=j.updated_at.isoformat() if j.updated_at else "",
+                completed_at=j.completed_at.isoformat() if getattr(j, "completed_at", None) else None,
                 coverage_percent=cov.get("coverage_percent"),
                 requirement_count=len((results or {}).get("requirements", [])) or None,
             ))
@@ -141,19 +148,50 @@ def get_job_endpoint(job_id: str):
         if not job:
             raise HTTPException(404, f"Unknown job_id '{job_id}'")
         
-        results = get_results(db, job_id)
+        results_wrapper = mongodb_tool.get_results(job_id)
+        results = results_wrapper.get("results", {}) if results_wrapper else {}
         log = mongodb_tool.get_execution_log(job_id)
         
         job_dict = {
-            "job_id": job.job_id,
-            "filename": job.filename,
-            "storage_url": job.storage_url,
-            "storage_backend": job.storage_backend,
+            "job_id": str(job.id),
+            "filename": job.document.filename if job.document else "",
+            "storage_url": job.document.storage_path if job.document else "",
+            "storage_backend": "supabase",
             "status": job.status,
             "created_at": job.created_at.isoformat() if job.created_at else "",
             "updated_at": job.updated_at.isoformat() if job.updated_at else "",
+            "completed_at": job.completed_at.isoformat() if getattr(job, "completed_at", None) else None,
         }
         return {"job": job_dict, "results": results, "execution_log": log}
+
+
+@router.get("/jobs/{job_id}/requirements/{req_code}/test-cases")
+def get_test_cases_for_requirement(job_id: str, req_code: str):
+    import uuid
+    from app.models.models import Requirement
+    with SessionLocal() as db:
+        test_cases = db.query(TestCase).join(Requirement).filter(
+            Requirement.job_id == uuid.UUID(job_id),
+            Requirement.req_code == req_code
+        ).all()
+        if not test_cases:
+            raise HTTPException(404, f"No test cases found for job '{job_id}' and req '{req_code}'")
+        
+        return [{
+            "test_id": str(t.id),
+            "req_id": t.requirement.req_code,
+            "scenario_id": None,
+            "title": t.title,
+            "type": t.type,
+            "priority": None,
+            "expected_result": t.expected_result,
+            "preconditions": [t.preconditions] if t.preconditions else [],
+            "steps": t.steps,
+            "test_data": t.test_data,
+            "postconditions": [t.postconditions] if t.postconditions else [],
+            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            "langsmith_run_id": t.langsmith_run_id,
+        } for t in test_cases]
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +271,8 @@ def delete_job_endpoint(job_id: str):
         if not job:
             raise HTTPException(404, f"Unknown job_id '{job_id}'")
         try:
-            supabase_tool.delete(job_id, job.filename)
+            if job.document:
+                supabase_tool.delete(str(job.id), job.document.filename)
         except Exception:
             pass
         delete_job(db, job_id)

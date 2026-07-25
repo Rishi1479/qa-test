@@ -4,13 +4,17 @@ from __future__ import annotations
 import json
 import uuid
 
+# pyrefly: ignore [missing-import]
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.tracers.context import collect_runs
 
 from app.agents.base import BaseAgent, timed, parse_json
 from app.agents.llm import get_llm
 from app.agents import prompts
 from app.agents.state import GraphState
 from app.config import settings
+from app.database import SessionLocal
+from app.crud.crud import save_incremental_requirements_and_testcases
 from app.schemas.schemas import (
     AcceptanceCriterion,
     CoverageSummary,
@@ -340,6 +344,8 @@ class QAArtifactGeneratorAgent(BaseAgent):
                 traceability, coverage = _build_traceability_and_coverage(
                     enriched, scenarios, test_cases
                 )
+                run_id_str = None
+                raw_response = None
             else:
                 # ---- Real mode: single LLM call ----
                 llm = get_llm()
@@ -348,11 +354,19 @@ class QAArtifactGeneratorAgent(BaseAgent):
                     indent=2,
                     ensure_ascii=False,
                 )
+                run_id_str = None
+                raw_response = None
                 try:
-                    resp = llm.invoke([
-                        SystemMessage(content=prompts.QA_ARTIFACT_GENERATOR),
-                        HumanMessage(content=user_msg),
-                    ])
+                    with collect_runs() as cb:
+                        resp = llm.invoke([
+                            SystemMessage(content=prompts.QA_ARTIFACT_GENERATOR),
+                            HumanMessage(content=user_msg),
+                        ])
+                        
+                        if cb.traced_runs:
+                            run_id_str = str(cb.traced_runs[0].id)
+                            
+                    raw_response = resp.content
                     scenarios, test_cases, acceptance_criteria, traceability, coverage = (
                         _parse_llm_artifacts(resp.content, enriched)
                     )
@@ -362,6 +376,24 @@ class QAArtifactGeneratorAgent(BaseAgent):
                     )
                     scenarios, test_cases, acceptance_criteria, traceability, coverage = (
                         _fallback_artifacts(enriched)
+                    )
+
+            # Persist incrementally
+            job_id = state.get("job_id")
+            if job_id:
+                try:
+                    with SessionLocal() as db:
+                        save_incremental_requirements_and_testcases(
+                            db=db,
+                            job_id=job_id,
+                            requirements=[e.model_dump() for e in enriched],
+                            test_cases=[tc.model_dump() for tc in test_cases],
+                            run_id=run_id_str,
+                            raw_response=raw_response
+                        )
+                except Exception as exc:
+                    updates.setdefault("errors", []).append(
+                        f"qa_artifact_generator incremental save failed: {exc}"
                     )
 
         updates["scenarios"] = scenarios

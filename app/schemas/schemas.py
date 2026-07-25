@@ -155,5 +155,6 @@ class JobSummary(BaseModel):
     status: str
     created_at: str
     updated_at: str
+    completed_at: Optional[str] = None
     coverage_percent: Optional[float] = None
     requirement_count: Optional[int] = None

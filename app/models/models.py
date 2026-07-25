@@ -1,129 +1,80 @@
+import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Float, Integer, Boolean, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, JSON
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.database import Base
 
 def utcnow():
     return datetime.now(timezone.utc)
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=utcnow)
-    
-    projects = relationship("Project", back_populates="user")
+# ---------------------------------------------------------
+# New Supabase-aligned Schema
+# ---------------------------------------------------------
 
-class Project(Base):
-    __tablename__ = "projects"
-    id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"))
-    name = Column(String)
-    created_at = Column(DateTime(timezone=True), default=utcnow)
-    
-    user = relationship("User", back_populates="projects")
-    jobs = relationship("AnalysisJob", back_populates="project")
-
-class AnalysisJob(Base):
-    __tablename__ = "analysis_jobs"
-    job_id = Column(String, primary_key=True, index=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=True)
+class Document(Base):
+    __tablename__ = "documents"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(String, unique=True, nullable=False)
     filename = Column(String, nullable=False)
-    storage_url = Column(String, nullable=True)
-    storage_backend = Column(String, nullable=True)
-    status = Column(String, default="uploaded")
+    file_type = Column(String)
+    file_size_bytes = Column(Integer)
+    storage_path = Column(String, nullable=False)
+    uploaded_by = Column(UUID(as_uuid=True), nullable=True) # References auth.users if available
+    parsed_status = Column(String, default="pending")
     created_at = Column(DateTime(timezone=True), default=utcnow)
-    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-    
-    project = relationship("Project", back_populates="jobs")
-    requirements = relationship("RequirementRecord", back_populates="job", cascade="all, delete")
-    scenarios = relationship("ScenarioRecord", back_populates="job", cascade="all, delete")
-    test_cases = relationship("TestCaseRecord", back_populates="job", cascade="all, delete")
-    acceptance_criteria = relationship("AcceptanceCriterionRecord", back_populates="job", cascade="all, delete")
-    traceability = relationship("TraceabilityRecord", back_populates="job", cascade="all, delete")
-    coverage_summary = relationship("CoverageSummaryRecord", back_populates="job", uselist=False, cascade="all, delete")
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
 
-class RequirementRecord(Base):
-    
+    # Relationships
+    jobs = relationship("Job", back_populates="document", cascade="all, delete")
+
+class Job(Base):
+    __tablename__ = "jobs"
+    id = Column(String, primary_key=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String, default="processing")
+    error_message = Column(String, nullable=True)
+    langsmith_trace_id = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    document = relationship("Document", back_populates="jobs")
+    requirements = relationship("Requirement", back_populates="job", cascade="all, delete")
+
+class Requirement(Base):
     __tablename__ = "requirements"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    job_id = Column(String, ForeignKey("analysis_jobs.job_id"))
-    req_id = Column(String, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(String, ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    req_code = Column(String, index=True)
     title = Column(String)
-    description = Column(String)
-    type = Column(String)
-    priority = Column(String)
-    
-    # Store all the list-based and extra fields as a JSON blob to match the EnrichedRequirement Pydantic schema easily
-    data = Column(JSON) 
-    
-    job = relationship("AnalysisJob", back_populates="requirements")
+    raw_text = Column(String)
+    requirement_type = Column(String)
+    priority = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
 
-class ScenarioRecord(Base):
-    __tablename__ = "scenarios"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    job_id = Column(String, ForeignKey("analysis_jobs.job_id"))
-    scenario_id = Column(String, index=True)
-    req_id = Column(String, index=True)
-    title = Column(String)
-    category = Column(String)
-    
-    job = relationship("AnalysisJob", back_populates="scenarios")
+    # Relationships
+    job = relationship("Job", back_populates="requirements")
+    test_cases = relationship("TestCase", back_populates="requirement", cascade="all, delete")
 
-class TestCaseRecord(Base):
+class TestCase(Base):
     __tablename__ = "test_cases"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    job_id = Column(String, ForeignKey("analysis_jobs.job_id"))
-    test_id = Column(String, index=True)
-    req_id = Column(String, index=True)
-    scenario_id = Column(String, index=True)
-    title = Column(String)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    requirement_id = Column(UUID(as_uuid=True), ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
     type = Column(String)
-    priority = Column(String)
+    title = Column(String)
+    preconditions = Column(String)
+    postconditions = Column(String)
+    steps = Column(JSONB)
     expected_result = Column(String)
-    
-    # store lists (preconditions, steps, test_data, postconditions) as JSON
-    data = Column(JSON)
-    
-    job = relationship("AnalysisJob", back_populates="test_cases")
+    test_data = Column(JSONB)
+    llm_raw_response = Column(JSONB)
+    langsmith_run_id = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
 
-class AcceptanceCriterionRecord(Base):
-    __tablename__ = "acceptance_criteria"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    job_id = Column(String, ForeignKey("analysis_jobs.job_id"))
-    req_id = Column(String, index=True)
-    given_clause = Column(String)
-    when_clause = Column(String)
-    then_clause = Column(String)
-    
-    job = relationship("AnalysisJob", back_populates="acceptance_criteria")
-
-class TraceabilityRecord(Base):
-    __tablename__ = "traceability"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    job_id = Column(String, ForeignKey("analysis_jobs.job_id"))
-    req_id = Column(String, index=True)
-    covered = Column(Boolean, default=False)
-    
-    # lists of IDs
-    scenario_ids = Column(JSON)
-    test_ids = Column(JSON)
-    
-    job = relationship("AnalysisJob", back_populates="traceability")
-
-class CoverageSummaryRecord(Base):
-    __tablename__ = "coverage_summaries"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    job_id = Column(String, ForeignKey("analysis_jobs.job_id"), unique=True)
-    total_requirements = Column(Integer)
-    covered_requirements = Column(Integer)
-    coverage_percent = Column(Float)
-    positive_count = Column(Integer, default=0)
-    negative_count = Column(Integer, default=0)
-    boundary_count = Column(Integer, default=0)
-    edge_count = Column(Integer, default=0)
-    
-    priority_breakdown = Column(JSON)
-    missing_coverage = Column(JSON)
-    
-    job = relationship("AnalysisJob", back_populates="coverage_summary")
+    # Relationships
+    requirement = relationship("Requirement", back_populates="test_cases")

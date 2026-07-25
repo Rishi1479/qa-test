@@ -6,7 +6,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.schemas.schemas import UploadResponse
 from app.tools.supabase_tool import supabase_tool
 from app.database import SessionLocal
-from app.crud.crud import create_job
+from app.crud.crud import create_document_and_job
 
 router = APIRouter(tags=["documents"])
 
@@ -27,10 +27,23 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(400, "File exceeds 20MB limit")
 
     job_id = f"JOB-{uuid.uuid4().hex[:10].upper()}"
+    document_id = str(uuid.uuid4())
+    storage_path = f"{job_id}/{file.filename}"
 
+    # Wait, the tool signature for supabase upload was `supabase_tool.upload(job_id, filename, content)`
+    # I should adapt it to just use job_id as the folder.
     storage_url = supabase_tool.upload(job_id, file.filename, content)
+    
     with SessionLocal() as db:
-        create_job(db, job_id, file.filename, storage_url, supabase_tool.backend)
+        create_document_and_job(
+            db, 
+            uuid.UUID(document_id), 
+            job_id, 
+            file.filename, 
+            ext, 
+            len(content), 
+            storage_path
+        )
 
     return UploadResponse(
         job_id=job_id,

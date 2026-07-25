@@ -161,8 +161,10 @@ def persistence_node(state: GraphState) -> dict:
         
         with SessionLocal() as db:
             save_results(db, job_id, results_payload)
+            
+        mongodb_tool.save_results(job_id, results_payload)
     except Exception as exc:
-        errors.append(f"persistence_node.save_results (Postgres): {exc}")
+        errors.append(f"persistence_node.save_results: {exc}")
 
     # 2. Save execution log to Mongo (include timings captured so far)
     _append_timing(state, updates, "persistence_node", time.time() - t0)
@@ -172,6 +174,7 @@ def persistence_node(state: GraphState) -> dict:
             {
                 "started_at":       exec_meta.get("started_at", ""),
                 "completed_at":     completed_at,
+                "updated_at":       completed_at,
                 "node_timings":     updates.get("node_timings", []),
                 "errors":           errors,
                 "validation_notes": state.get("validation_notes", []),
@@ -180,10 +183,14 @@ def persistence_node(state: GraphState) -> dict:
     except Exception as exc:
         errors.append(f"persistence_node.save_execution_log (Mongo): {exc}")
 
-   
     try:
         with SessionLocal() as db:
-            update_job_status(db, job_id, "completed")
+            from app.crud.crud import get_job
+            job = get_job(db, job_id)
+            if job:
+                job.status = "completed"
+                job.completed_at = datetime.fromisoformat(completed_at)
+                db.commit()
     except Exception as exc:
         errors.append(f"persistence_node.update_job_status (Postgres): {exc}")
 

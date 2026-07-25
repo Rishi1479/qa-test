@@ -51,10 +51,6 @@ class BaseAgent(ABC):
         return self.run(state)
 
 
-# ---------------------------------------------------------------------------
-# Shared stateless helpers — owned here so no agent file needs to re-implement
-# ---------------------------------------------------------------------------
-
 @contextmanager
 def timed(node_name: str, state_updates: dict):
     """
