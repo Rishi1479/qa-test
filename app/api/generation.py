@@ -165,6 +165,28 @@ def get_job_endpoint(job_id: str):
         return {"job": job_dict, "results": results, "execution_log": log}
 
 
+@router.get("/jobs/{job_id}/enriched-requirements")
+def get_enriched_requirements(job_id: str):
+    """Return the full 27-field EnrichedRequirement objects saved by the
+    Requirement Intelligence Agent for this job.  These include every field
+    the LLM extracted: role, validations (with field/rule/value), numeric_limits,
+    edge_cases, ambiguous_statements, preconditions, postconditions, etc.
+    Stored in MongoDB's 'enriched_requirements' collection."""
+    with SessionLocal() as db:
+        job = get_job(db, job_id)
+        if not job:
+            raise HTTPException(404, f"Unknown job_id '{job_id}'")
+
+    enriched = mongodb_tool.get_enriched_requirements(job_id)
+    if not enriched:
+        raise HTTPException(
+            404,
+            f"No enriched requirements found for job '{job_id}'. "
+            "Run /generate first, or the job may still be processing.",
+        )
+    return {"job_id": job_id, "count": len(enriched), "requirements": enriched}
+
+
 @router.get("/jobs/{job_id}/requirements/{req_code}/test-cases")
 def get_test_cases_for_requirement(job_id: str, req_code: str):
     import uuid

@@ -23,8 +23,119 @@ from app.tools.boundary_tool import extract_boundary_values
 _MOCK = settings.LLM_PROVIDER == "mock"
 _RISKY_KEYWORDS = ("password", "payment", "auth", "encrypt", "phi", "security", "login")
 
+def _infer_role(description: str) -> str:
+    """Deterministic role inference matching the LLM prompt rules.
+    Returns a specific actor — never 'User' or 'Person'."""
+    lower = description.lower()
+
+    # System-level SLA / infrastructure behavior takes priority.
+    # These requirements describe what the *system* must do, even if "patient"
+    # or "provider" appears as a noun modifier (e.g. "patient booking dashboard").
+    system_behavior_signals = (
+        "uptime", "latency", "load time", "page load", "page must load",
+        "must load in", "load in under", "response time", "throughput",
+        "encrypt", "bcrypt", "hash", "hashed", "security enforcement",
+        "authentication must", "authorization must",
+    )
+    if any(sig in lower for sig in system_behavior_signals):
+        return "System"
+
+    has_patient  = bool(re.search(r"\bpatients?\b", lower))
+    has_provider = bool(re.search(r"\bproviders?\b", lower))
+    has_admin    = bool(re.search(r"\badmins?(istrators?)?\b", lower))
+
+    if has_patient and has_provider:
+        return "Patient, Provider"
+    if has_patient:
+        return "Patient"
+    if has_provider:
+        return "Provider"
+    if has_admin:
+        return "Admin"
+    # Broader system-level keywords (performance, security)
+    system_keywords = ("performance", "encrypt", "bcrypt", "hash", "security",
+                       "authentication", "authorization", "throughput")
+    if any(kw in lower for kw in system_keywords):
+        return "System"
+    return "System"   # safe fallback — never "User"
+
+
+# Patterns that signal a numeric/time/format constraint
+_CONSTRAINT_PATTERNS: list[tuple[re.Pattern, str, str]] = [
+    # "at least N characters" / "minimum N characters"
+    (re.compile(r"(?:at least|minimum of?|min)\s+(\d+)\s+characters?", re.I),
+     "password_length", "min_length"),
+    # "N characters" standalone (e.g. "8 characters")
+    (re.compile(r"(\d+)\s+characters?", re.I), "field_length", "min_length"),
+    # "up to N hours prior" / "N hours before"
+    (re.compile(r"(?:up to|within|before)\s+(\d+)\s+hours?", re.I),
+     "notice_period_hours", "min_hours_before"),
+    # "N hours prior"
+    (re.compile(r"(\d+)\s+hours?\s+prior", re.I), "notice_period_hours", "min_hours_before"),
+    # "under N.N seconds" / "in N seconds" / "less than N seconds"
+    (re.compile(r"(?:under|in|less than|within)\s+([\d.]+)\s+seconds?", re.I),
+     "response_time_seconds", "max_seconds"),
+    # "N milliseconds" / "under N ms"
+    (re.compile(r"(?:under|less than|within)?\s*([\d.]+)\s*(?:ms|milliseconds?)", re.I),
+     "latency_ms", "max_ms"),
+    # "N% uptime" / "uptime of N.N%"
+    (re.compile(r"(\d+(?:\.\d+)?)\s*%", re.I), "uptime_percent", "min_percent"),
+    # "N-minute time slots" / "N-minute slots"
+    (re.compile(r"(\d+)-?minute\s+(?:time\s+)?slots?", re.I),
+     "slot_duration_minutes", "fixed_value"),
+    # "every N minutes" / "N minutes"
+    (re.compile(r"(\d+)\s+minutes?", re.I), "duration_minutes", "fixed_value"),
+]
+
+
+def _extract_validations(description: str) -> list[dict]:
+    """Extract structured {field, rule, value} validation objects from description text.
+    Applies the same patterns as the LLM prompt instructs, deterministically."""
+    lower = description.lower()
+    # Quick bail-out: no trigger words at all
+    trigger_words = ("at least", "under", "before", "within", "up to", "minimum",
+                     "maximum", "must not exceed", "no more than", "prior to",
+                     "at most", "%", "second", "minute", "hour", "character",
+                     "ms", "millisecond", "slot")
+    if not any(t in lower for t in trigger_words) and not re.search(r"\d", description):
+        return []
+
+    seen: set[tuple] = set()
+    results: list[dict] = []
+
+    for pattern, default_field, rule in _CONSTRAINT_PATTERNS:
+        for m in pattern.finditer(description):
+            raw_val = m.group(1)
+            # Numeric coercion
+            try:
+                value: object = int(raw_val) if "." not in raw_val else float(raw_val)
+            except ValueError:
+                value = raw_val
+
+            # Use a more descriptive field name based on context
+            ctx = description[max(0, m.start() - 60): m.end() + 60].lower()
+            field = default_field
+            if "password" in ctx:
+                field = "password"
+            elif "cancell" in ctx or "cancel" in ctx or "prior" in ctx:
+                field = "cancellation_notice"
+            elif "page load" in ctx or "dashboard" in ctx or ("page" in ctx and "load" in ctx):
+                field = "page_load_time"
+            elif "uptime" in ctx or "%" in m.group(0):
+                field = "uptime"
+            elif "slot" in ctx:
+                field = "slot_duration_minutes"
+
+            key = (field, rule, value)
+            if key not in seen:
+                seen.add(key)
+                results.append({"field": field, "rule": rule, "value": value})
+
+    return results
+
+
 def _enrich_from_requirement(req: Requirement) -> EnrichedRequirement:
-    
+
     # Determine priority by risk keywords
     lower = req.description.lower()
     if any(k in lower for k in _RISKY_KEYWORDS):
@@ -33,6 +144,19 @@ def _enrich_from_requirement(req: Requirement) -> EnrichedRequirement:
         priority = "Medium"
     else:
         priority = "Low"
+
+    # ---- Role (deterministic, never "User") ----
+    if req.role and req.role.strip().lower() not in ("user", "person", ""):
+        role = req.role
+    else:
+        role = _infer_role(req.description)
+
+    # ---- Validations: prefer LLM-supplied structured rules; extract from text otherwise ----
+    if req.validations:
+        # Already structured ValidationRule objects from the schema validator
+        validation_rules = [v.model_dump() for v in req.validations]
+    else:
+        validation_rules = _extract_validations(req.description)
 
     # Extract numeric limits via the existing boundary tool
     boundary_str = extract_boundary_values.invoke({"requirement_text": req.raw_text})
@@ -45,7 +169,6 @@ def _enrich_from_requirement(req: Requirement) -> EnrichedRequirement:
     # Build edge_cases from raw_text
     edge_cases: list[str] = []
     if "edge case" in req.raw_text.lower():
-        # Preserve the original edge case text
         match = re.search(r"edge case[s]?\s*[:\-–]\s*(.+)", req.raw_text, re.IGNORECASE)
         if match:
             edge_cases.append(match.group(1).strip())
@@ -85,7 +208,6 @@ def _enrich_from_requirement(req: Requirement) -> EnrichedRequirement:
 
     # ---- Build requirement-specific acceptance criteria ----
     ac_parts: list[str] = []
-    # Precondition → Given
     if "authenticated" in lower or "auth" in lower or "login" in lower:
         given = "the user is authenticated and on the relevant page"
     elif "register" in lower or "create an account" in lower:
@@ -93,16 +215,16 @@ def _enrich_from_requirement(req: Requirement) -> EnrichedRequirement:
     else:
         given = f"the preconditions for {req.req_id} ({req.title}) are met"
 
-    # Action → When
     when = f'the user performs "{req.title.lower()}"'
 
-    # Expected → Then (use validation rules if available, else description)
-    if req.validations:
-        then = "; ".join(req.validations)
+    if validation_rules:
+        then = "; ".join(
+            f"{vr['field']} must satisfy {vr['rule']} = {vr['value']}"
+            for vr in validation_rules
+        )
     elif example_output:
         then = example_output
     else:
-        # Derive from description
         then = req.description.rstrip(".")
 
     ac_text = f"Given {given}, when {when}, then {then}"
@@ -114,8 +236,8 @@ def _enrich_from_requirement(req: Requirement) -> EnrichedRequirement:
         description=req.description,
         type=req.type,
         actors=["System"],
-        user_roles=[req.role] if req.role else ["User"],
-        validation_rules=req.validations,
+        user_roles=[role],
+        validation_rules=validation_rules,
         business_rules=[],
         constraints=[],
         preconditions=[f"Preconditions for {req.req_id} are satisfied"],

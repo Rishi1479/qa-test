@@ -1,7 +1,29 @@
 """Pydantic models shared across the API, the tools, and the LangGraph state."""
 from __future__ import annotations
 from typing import Optional
+# pyrefly: ignore [missing-import]
 from pydantic import BaseModel, Field, field_validator
+
+
+class ValidationRule(BaseModel):
+    """A single numeric/format/time constraint extracted from a requirement."""
+    field: str
+    rule: str
+    value: object  # int | float | str
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _coerce_value(cls, v):
+        """Accept int, float, or string. Try numeric coercion first."""
+        if isinstance(v, (int, float)):
+            return v
+        if isinstance(v, str):
+            for cast in (int, float):
+                try:
+                    return cast(v)
+                except ValueError:
+                    pass
+        return v
 
 
 class Requirement(BaseModel):
@@ -12,10 +34,33 @@ class Requirement(BaseModel):
     raw_text: str
     type: str = "Functional"
     role: Optional[str] = None
-    validations: list[str] = Field(default_factory=list)
+    validations: list[ValidationRule] = Field(default_factory=list)
     is_ambiguous: bool = False
     ambiguity_reason: Optional[str] = None
     is_duplicate_of: Optional[str] = None
+
+    @field_validator("validations", mode="before")
+    @classmethod
+    def _coerce_validations(cls, v):
+        """Accept list of dicts (new format) or list of strings (legacy).
+        Strings are stored as {field: 'constraint', rule: 'description', value: v}."""
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, dict):
+                result.append(item)
+            elif isinstance(item, str) and item.strip():
+                result.append({"field": "constraint", "rule": "description", "value": item})
+        return result
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _reject_generic_role(cls, v):
+        """Prevent generic 'User' / 'Person' from ever persisting."""
+        if isinstance(v, str) and v.strip().lower() in ("user", "person"):
+            return None
+        return v
 
 
 class EnrichedRequirement(BaseModel):
@@ -35,9 +80,23 @@ class EnrichedRequirement(BaseModel):
     user_roles: list[str] = Field(default_factory=list)
 
     # Business & validation rules
-    validation_rules: list[str] = Field(default_factory=list)
+    validation_rules: list[ValidationRule] = Field(default_factory=list)
     business_rules: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
+
+    @field_validator("validation_rules", mode="before")
+    @classmethod
+    def _coerce_validation_rules(cls, v):
+        """Accept list of ValidationRule dicts or legacy plain strings."""
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, dict):
+                result.append(item)
+            elif isinstance(item, str) and item.strip():
+                result.append({"field": "constraint", "rule": "description", "value": item})
+        return result
 
     # Pre/post conditions
     preconditions: list[str] = Field(default_factory=list)

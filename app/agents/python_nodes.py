@@ -113,7 +113,16 @@ def json_formatter_node(state: GraphState) -> dict:
                 description=er.description,
                 raw_text=er.description,
                 type=er.type,
-                validations=er.validation_rules,
+                # Preserve the LLM-derived role (first user_role, never null)
+                role=er.user_roles[0] if er.user_roles else (er.actors[0] if er.actors else None),
+                # Serialize ValidationRule objects → dicts for the coerce validator
+                validations=[
+                    v.model_dump() if hasattr(v, "model_dump") else v
+                    for v in er.validation_rules
+                ],
+                # Preserve ambiguity analysis
+                is_ambiguous=bool(er.ambiguous_statements),
+                ambiguity_reason=er.ambiguous_statements[0] if er.ambiguous_statements else None,
             )
             for er in enriched
         ]
@@ -173,6 +182,19 @@ def persistence_node(state: GraphState) -> dict:
         mongodb_tool.save_results(job_id, results_payload)
     except Exception as exc:
         errors.append(f"persistence_node.save_results: {exc}")
+
+    # 1b. Save enriched_requirements (full 27-field objects) to MongoDB so that
+    #     role, validations, ambiguity, edge_cases, numeric_limits, etc. are
+    #     durably persisted and queryable, not just kept in graph state.
+    try:
+        enriched = state.get("enriched_requirements", [])
+        if enriched:
+            mongodb_tool.save_enriched_requirements(
+                job_id,
+                [er.model_dump() for er in enriched],
+            )
+    except Exception as exc:
+        errors.append(f"persistence_node.save_enriched_requirements (Mongo): {exc}")
 
     # 2. Save execution log to Mongo (include timings captured so far)
     _append_timing(state, updates, "persistence_node", time.time() - t0)

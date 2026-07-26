@@ -2,9 +2,10 @@
 MongoDB Tool
 ---------------------
 Single responsibility: persist and retrieve execution logs from LangGraph.
-One collection:
+Two collections:
 
-  execution_logs    {job_id, started_at, completed_at, duration_seconds, node_timings, errors}
+  execution_logs       {job_id, started_at, completed_at, duration_seconds, node_timings, errors}
+  enriched_requirements {job_id, requirements: [27-field EnrichedRequirement dicts]}
 
 Real backend: MongoDB via pymongo (a plain connection
 string in MONGODB_URI).
@@ -122,6 +123,26 @@ class MongoDBTool:
         
     def get_results(self, job_id: str) -> dict | None:
         return self._backend.get("results", job_id)
+
+    # ---- enriched_requirements collection ----
+    def save_enriched_requirements(self, job_id: str, requirements: list[dict]) -> None:
+        """Persist the full 27-field EnrichedRequirement objects produced by the
+        Requirement Intelligence Agent.  Stored as a list under 'requirements'
+        so every field (role, validations, numeric_limits, edge_cases, ambiguous_
+        statements, etc.) is queryable from MongoDB independently of the
+        condensed 'results' payload."""
+        self._backend.upsert(
+            "enriched_requirements",
+            job_id,
+            {"job_id": job_id, "requirements": requirements, "saved_at": _now()},
+        )
+
+    def get_enriched_requirements(self, job_id: str) -> list[dict]:
+        """Return the stored enriched requirements for a job, or [] if not found."""
+        doc = self._backend.get("enriched_requirements", job_id)
+        if doc and isinstance(doc.get("requirements"), list):
+            return doc["requirements"]
+        return []
 
 
 mongodb_tool = MongoDBTool()

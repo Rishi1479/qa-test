@@ -198,12 +198,16 @@ class TestSpecificAcceptanceCriteria:
 
     def test_ac_uses_validation_rules_when_available(self):
         req = _make_enriched(
-            validation_rules=["Email must be unique", "Password must be 8+ characters"],
+            validation_rules=[
+                {"field": "email", "rule": "unique", "value": "true"},
+                {"field": "password", "rule": "min_length", "value": 8},
+            ],
         )
         criteria = _mock_acceptance_criteria([req])
         ac = criteria[0]
-        assert "Email must be unique" in ac.then
-        assert "Password must be 8+ characters" in ac.then
+        # Then should encode the validation rules in field/rule/value form
+        assert "email" in ac.then.lower()
+        assert "password" in ac.then.lower()
 
     def test_ac_given_is_context_specific(self):
         req = _make_enriched(

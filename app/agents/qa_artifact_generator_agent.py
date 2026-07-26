@@ -275,7 +275,13 @@ def _mock_acceptance_criteria(enriched: list[EnrichedRequirement]) -> list[Accep
 
         # ---- Derive specific Then from validation rules / description ----
         if req.validation_rules:
-            then = "the system validates: " + "; ".join(req.validation_rules)
+            def _vr_str(vr) -> str:
+                if hasattr(vr, "field"):
+                    return f"{vr.field} must satisfy {vr.rule} = {vr.value}"
+                if isinstance(vr, dict):
+                    return f"{vr.get('field','?')} must satisfy {vr.get('rule','?')} = {vr.get('value','?')}"
+                return str(vr)
+            then = "the system validates: " + "; ".join(_vr_str(vr) for vr in req.validation_rules)
         elif req.example_output:
             then = req.example_output
         else:
