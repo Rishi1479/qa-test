@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -47,6 +50,64 @@ def _enrich_from_requirement(req: Requirement) -> EnrichedRequirement:
         if match:
             edge_cases.append(match.group(1).strip())
 
+    # ---- Extract Example Input / Example Output from raw_text ----
+    example_input = ""
+    example_output = ""
+    ei_match = re.search(
+        r"Example Input\s*:\s*(.+?)(?=\n(?:Example Output|Edge Case|Validation|$))",
+        req.raw_text, re.IGNORECASE | re.DOTALL,
+    )
+    if ei_match:
+        example_input = ei_match.group(1).strip()
+    eo_match = re.search(
+        r"Example Output\s*:\s*(.+?)(?=\n(?:Edge Case|Validation|$))",
+        req.raw_text, re.IGNORECASE | re.DOTALL,
+    )
+    if eo_match:
+        example_output = eo_match.group(1).strip()
+
+    # ---- Derive input parameters from description ----
+    input_parameters: list[str] = []
+    param_keywords = [
+        ("email", "email address"),
+        ("password", "password"),
+        ("username", "username"),
+        ("slot", "time slot"),
+        ("provider", "provider ID"),
+        ("patient", "patient ID"),
+        ("appointment", "appointment ID"),
+        ("date", "date"),
+        ("time", "time"),
+    ]
+    for keyword, param_name in param_keywords:
+        if keyword in lower:
+            input_parameters.append(param_name)
+
+    # ---- Build requirement-specific acceptance criteria ----
+    ac_parts: list[str] = []
+    # Precondition → Given
+    if "authenticated" in lower or "auth" in lower or "login" in lower:
+        given = "the user is authenticated and on the relevant page"
+    elif "register" in lower or "create an account" in lower:
+        given = "the user is on the registration page"
+    else:
+        given = f"the preconditions for {req.req_id} ({req.title}) are met"
+
+    # Action → When
+    when = f'the user performs "{req.title.lower()}"'
+
+    # Expected → Then (use validation rules if available, else description)
+    if req.validations:
+        then = "; ".join(req.validations)
+    elif example_output:
+        then = example_output
+    else:
+        # Derive from description
+        then = req.description.rstrip(".")
+
+    ac_text = f"Given {given}, when {when}, then {then}"
+    ac_parts.append(ac_text)
+
     return EnrichedRequirement(
         req_id=req.req_id,
         title=req.title,
@@ -59,15 +120,11 @@ def _enrich_from_requirement(req: Requirement) -> EnrichedRequirement:
         constraints=[],
         preconditions=[f"Preconditions for {req.req_id} are satisfied"],
         postconditions=[f"System state updated per {req.req_id}"],
-        input_parameters=[],
+        input_parameters=input_parameters,
         output_behaviour=f"System completes the action described in {req.req_id}",
-        example_input="",
-        example_output="",
-        acceptance_criteria=[
-            f"Given preconditions of {req.req_id} are met, "
-            f"when the action is performed, "
-            f"then the system responds as described in Example Output"
-        ],
+        example_input=example_input,
+        example_output=example_output,
+        acceptance_criteria=ac_parts,
         security_rules=[],
         performance_rules=[],
         dependencies=[],
@@ -138,10 +195,12 @@ class RequirementIntelligenceAgent(BaseAgent):
             )
 
             try:
+                logger.info("llm start")
                 resp = llm.invoke([
                     SystemMessage(content=prompts.REQUIREMENT_INTELLIGENCE),
                     HumanMessage(content=user_msg),
                 ])
+                logger.info("llm end")
                 enriched = _parse_enriched_list(resp.content, requirements)
             except Exception as exc:
                 updates.setdefault("errors", []).append(

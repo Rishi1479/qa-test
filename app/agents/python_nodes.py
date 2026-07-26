@@ -64,6 +64,18 @@ def validation_node(state: GraphState) -> dict:
             if tid not in tc_ids_in_list:
                 notes.append(f"Orphan test_id '{tid}' in traceability row {row.req_id}")
 
+    # --- Duplicate scenario detection ---
+    seen_scenario_titles: dict[str, str] = {}  # (req_id::title) -> scenario_id
+    for sc in scenarios:
+        key = f"{sc.req_id}::{sc.title}"
+        if key in seen_scenario_titles:
+            notes.append(
+                f"Duplicate scenario: '{sc.scenario_id}' has the same title as "
+                f"'{seen_scenario_titles[key]}' for requirement {sc.req_id}"
+            )
+        else:
+            seen_scenario_titles[key] = sc.scenario_id
+
    
     coverage = state.get("coverage")
     temp_payload = {
@@ -126,10 +138,6 @@ def json_formatter_node(state: GraphState) -> dict:
         coverage=coverage,
     )
 
-    # Embed enriched_requirements in the output for full fidelity
-    if enriched:
-        payload["enriched_requirements"] = [e.model_dump() for e in enriched]
-
     fixed_payload, notes = validate_output(payload)
     markdown = to_markdown(fixed_payload)
 
@@ -169,14 +177,17 @@ def persistence_node(state: GraphState) -> dict:
     # 2. Save execution log to Mongo (include timings captured so far)
     _append_timing(state, updates, "persistence_node", time.time() - t0)
     try:
+        all_timings = state.get("node_timings", []) + updates.get("node_timings", [])
+        all_errors = state.get("errors", []) + errors
+        
         mongodb_tool.save_execution_log(
             job_id,
             {
                 "started_at":       exec_meta.get("started_at", ""),
                 "completed_at":     completed_at,
                 "updated_at":       completed_at,
-                "node_timings":     updates.get("node_timings", []),
-                "errors":           errors,
+                "node_timings":     all_timings,
+                "errors":           all_errors,
                 "validation_notes": state.get("validation_notes", []),
             },
         )

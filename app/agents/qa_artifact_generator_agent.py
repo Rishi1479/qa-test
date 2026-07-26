@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 # pyrefly: ignore [missing-import]
 from langchain_core.messages import SystemMessage, HumanMessage
+# pyrefly: ignore [missing-import]
 from langchain_core.tracers.context import collect_runs
 
 from app.agents.base import BaseAgent, timed, parse_json
@@ -26,6 +30,99 @@ from app.schemas.schemas import (
 from app.tools.boundary_tool import extract_boundary_values
 
 _MOCK = settings.LLM_PROVIDER == "mock"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _parse_boundary_output(bound_str: str) -> list[str]:
+    """Parse the structured output of extract_boundary_values into individual
+    test-data entries with concrete numeric values.
+
+    The boundary tool returns lines like:
+        range 8-20: boundary values -> 7(invalid), 8(valid-min), 9(valid), ...
+        minimum 8: boundary values -> 7(invalid), 8(valid), 9(valid)
+    We parse these into:
+        ["value=7 (invalid, below-min)", "value=8 (valid, min-boundary)", ...]
+    """
+    if not bound_str or "No explicit" in bound_str:
+        return []
+    import re
+    entries: list[str] = []
+    for line in bound_str.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Extract the label part (e.g. "range 8-20") and the values part
+        arrow_idx = line.find("->")
+        if arrow_idx == -1:
+            entries.append(line)
+            continue
+        label = line[:arrow_idx].strip()
+        values_part = line[arrow_idx + 2:].strip()
+        # Parse individual values: "7(invalid)", "8(valid-min)", etc.
+        for val_match in re.finditer(r"([\d.]+)\(([^)]+)\)", values_part):
+            value = val_match.group(1)
+            validity = val_match.group(2)
+            entries.append(f"value={value} ({validity}, {label})")
+    return entries
+
+
+# Keyword-to-sample-data mapping for context-aware test data generation
+_TEST_DATA_TEMPLATES: list[tuple[list[str], list[str]]] = [
+    (
+        ["register", "create an account", "sign up"],
+        ["email=new.user@example.com", "password=Str0ngP@ss1!", "name=Jane Doe"],
+    ),
+    (
+        ["availability", "schedule", "time slot", "recurring"],
+        ["provider_id=PROV-001", "day=Monday", 'slots=["09:00-09:30","09:30-10:00"]'],
+    ),
+    (
+        # Video/telemedicine must come before booking because both may
+        # mention "appointment" — the video keywords are more specific.
+        ["video", "call", "telemedicine", "consultation", "link"],
+        ["appointment_id=APT-001", "participant_role=patient", "device=desktop"],
+    ),
+    (
+        ["book", "reservation"],
+        ["patient_id=PAT-001", "provider_id=PROV-001", "slot=2024-01-15T09:00"],
+    ),
+    (
+        ["login", "sign in", "authentication"],
+        ["email=jane.doe@example.com", "password=SecureP@ss1!"],
+    ),
+    (
+        ["search", "find", "filter", "query"],
+        ["query=cardiology", "location=New York", "radius_km=25"],
+    ),
+    (
+        ["payment", "billing", "charge", "invoice"],
+        ["amount=150.00", "currency=USD", "payment_method=credit_card"],
+    ),
+    (
+        ["notification", "alert", "reminder"],
+        ["recipient=user@example.com", "type=appointment_reminder", "channel=email"],
+    ),
+]
+
+
+def _generate_sample_test_data(req: EnrichedRequirement) -> list[str]:
+    """Generate context-aware test data by matching requirement keywords."""
+    if req.example_input:
+        return [req.example_input]
+
+    lower_desc = (req.title + " " + req.description).lower()
+    for keywords, sample_data in _TEST_DATA_TEMPLATES:
+        if any(kw in lower_desc for kw in keywords):
+            return sample_data
+
+    # Fallback: derive from input_parameters if available
+    if req.input_parameters:
+        return [f"{param}=<valid_value>" for param in req.input_parameters]
+
+    return [f"input=valid data for {req.title}"]
+
 
 # ---------------------------------------------------------------------------
 # Mock-mode artifact generators
@@ -49,9 +146,17 @@ def _mock_scenarios(enriched: list[EnrichedRequirement]) -> list[ScenarioItem]:
         if not req.edge_cases:
             base.append((f"Edge: concurrent access on {req.title.lower()}", "edge"))
 
-        for i, (title, category) in enumerate(base, start=1):
+        # --- Deduplicate scenarios by (req_id, title) ---
+        seen_titles: set[str] = set()
+        counter = 0
+        for title, category in base:
+            dedup_key = f"{req.req_id}::{title}"
+            if dedup_key in seen_titles:
+                continue
+            seen_titles.add(dedup_key)
+            counter += 1
             scenarios.append(ScenarioItem(
-                scenario_id=f"SC-{req.req_id}-{i:02d}",
+                scenario_id=f"SC-{req.req_id}-{counter:02d}",
                 req_id=req.req_id,
                 title=title,
                 category=category,
@@ -91,13 +196,16 @@ def _mock_test_cases(
             preconditions = [f"System is operational; {req.req_id} preconditions do NOT apply"]
             postconditions = ["No state change in the system"]
         elif is_boundary:
-            # Extract real boundary values from the requirement
+            # Extract real boundary values and parse into concrete test data
             bound_str = extract_boundary_values.invoke({"requirement_text": req.description})
-            test_data = [bound_str[:200]] if "No explicit" not in bound_str else [
-                "value=boundary-min-1 (invalid)",
-                "value=boundary-min (valid)",
-                "value=boundary-min+1 (valid)",
-            ]
+            parsed_boundaries = _parse_boundary_output(bound_str)
+            if parsed_boundaries:
+                test_data = parsed_boundaries
+            elif req.numeric_limits:
+                # Fall back to pre-computed numeric limits from enrichment
+                test_data = [f"value={lim}" for lim in req.numeric_limits[:3]]
+            else:
+                test_data = [f"No numeric constraints found for {req.req_id}"]
             expected = (
                 "System accepts values at and above the minimum boundary; "
                 "rejects values below the minimum boundary"
@@ -117,16 +225,8 @@ def _mock_test_cases(
             preconditions = ["System is under normal operational load"]
             postconditions = ["System remains stable and consistent"]
         else:
-            # Positive test case — use realistic sample data
-            example_parts = []
-            if req.example_input:
-                example_parts.append(req.example_input)
-            else:
-                example_parts = [
-                    "email=john.doe@example.com",
-                    "password=Password123!",
-                ]
-            test_data = example_parts
+            # Positive test case — use context-aware sample data
+            test_data = _generate_sample_test_data(req)
             expected = (
                 req.example_output
                 if req.example_output
@@ -159,28 +259,34 @@ def _mock_test_cases(
 def _mock_acceptance_criteria(enriched: list[EnrichedRequirement]) -> list[AcceptanceCriterion]:
     criteria: list[AcceptanceCriterion] = []
     for req in enriched:
-        if req.acceptance_criteria:
-            # Try to parse the first AC as Given/When/Then
-            ac_text = req.acceptance_criteria[0]
-            criteria.append(AcceptanceCriterion(
-                req_id=req.req_id,
-                given=f"the preconditions of {req.req_id} are fully satisfied",
-                when=f'the user or system performs the action described in "{req.title}"',
-                then=ac_text if ac_text else (
-                    req.example_output or
-                    f"the system behaves as described in {req.req_id} with no errors"
-                ),
-            ))
+        # ---- Derive specific Given from preconditions / context ----
+        lower_desc = req.description.lower()
+        if req.preconditions and req.preconditions[0] != f"Preconditions for {req.req_id} are satisfied":
+            given = req.preconditions[0]
+        elif "authenticated" in lower_desc or "auth" in lower_desc:
+            given = "the user is authenticated and on the relevant page"
+        elif "register" in lower_desc or "create an account" in lower_desc:
+            given = "the user is on the registration page with valid form fields visible"
         else:
-            criteria.append(AcceptanceCriterion(
-                req_id=req.req_id,
-                given=f"the preconditions of {req.req_id} are fully satisfied",
-                when=f'the user or system performs the action described in "{req.title}"',
-                then=(
-                    req.example_output or
-                    f"the system responds as described in {req.req_id} within the defined constraints"
-                ),
-            ))
+            given = f"the system is operational and {req.req_id} preconditions are met"
+
+        # ---- Derive specific When from title ----
+        when = f'the user performs "{req.title.lower()}" with valid inputs'
+
+        # ---- Derive specific Then from validation rules / description ----
+        if req.validation_rules:
+            then = "the system validates: " + "; ".join(req.validation_rules)
+        elif req.example_output:
+            then = req.example_output
+        else:
+            then = req.description.rstrip(".")
+
+        criteria.append(AcceptanceCriterion(
+            req_id=req.req_id,
+            given=given,
+            when=when,
+            then=then,
+        ))
     return criteria
 
 def _build_traceability_and_coverage(
@@ -244,11 +350,16 @@ def _parse_llm_artifacts(
     if not isinstance(raw, dict):
         return _fallback_artifacts(enriched)
 
-    # --- Scenarios ---
+    # --- Scenarios (with dedup by scenario_id) ---
     scenarios: list[ScenarioItem] = []
+    seen_scenario_ids: set[str] = set()
     for item in raw.get("scenarios", []):
         try:
-            scenarios.append(ScenarioItem(**item))
+            sc = ScenarioItem(**item)
+            if sc.scenario_id in seen_scenario_ids:
+                continue
+            seen_scenario_ids.add(sc.scenario_id)
+            scenarios.append(sc)
         except Exception:
             pass
 
@@ -358,10 +469,12 @@ class QAArtifactGeneratorAgent(BaseAgent):
                 raw_response = None
                 try:
                     with collect_runs() as cb:
+                        logger.info("llm start")
                         resp = llm.invoke([
                             SystemMessage(content=prompts.QA_ARTIFACT_GENERATOR),
                             HumanMessage(content=user_msg),
                         ])
+                        logger.info("llm end")
                         
                         if cb.traced_runs:
                             run_id_str = str(cb.traced_runs[0].id)

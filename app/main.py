@@ -1,3 +1,15 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="langgraph")
+warnings.filterwarnings("ignore", module="langchain")
+warnings.filterwarnings("ignore", message=".*allowed_objects.*")
+
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
 from fastapi import FastAPI
 from app.api import documents, generation
 from app.config import settings

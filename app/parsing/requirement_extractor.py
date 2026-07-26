@@ -8,19 +8,40 @@ plain unit tests, (c) the LLM agents downstream get a clean, consistent
 input shape regardless of how a given document happens to be worded.
 
 Two extraction strategies, tried in order:
-1. "FR-N: Title" style (what both sample requirement docs in this
-   project use) -- captures Description / Validation Conditions /
-   Role-Based Conditions / Example Input / Example Output / Edge Case
-   as sub-fields when present, and folds them into `description` so
-   later agents see the full context.
+1. "FR-N / NFR-N / CR-N: Title" style -- captures Description /
+   Validation Conditions / Role-Based Conditions / Example Input /
+   Example Output / Edge Case as sub-fields when present, and folds
+   them into ``description`` so later agents see the full context.
 2. Generic fallback: numbered/bulleted top-level sentences become
-   REQ-001, REQ-002, ... when no FR-N pattern is found.
+   REQ-001, REQ-002, ... when no requirement-ID pattern is found.
 """
 from __future__ import annotations
 import re
 from app.schemas.schemas import Requirement
 
-_FR_HEADER = re.compile(r"^\s*(?:[*\-•●]\s*)?(?:\*\*)?(FR-\d+)(?:\*\*)?\s*:\s*(.+)$")
+# ---- Section-boundary detector (e.g. "## 4. Non-Functional Requirements")
+# Matches markdown-style headings or plain numbered section titles that signal
+# a new document section. Hitting one of these flushes the current requirement
+# so trailing text never bleeds from one section into the last requirement's
+# sub-field.
+_SECTION_HEADING = re.compile(
+    r"^\s*(?:#{1,4}\s+)?\d+\.\s+\S",
+)
+
+# ---- Requirement-header detector -----------------------------------------
+# Broadened from the original FR-only regex to also match NFR-N and CR-N
+# prefixes.  Separator relaxed to accept ":", " -", " –", or " —".
+_REQ_HEADER = re.compile(
+    r"^\s*(?:#{1,6}\s+)?(?:[*\-•●]\s*)?(?:\*\*)?((FR|NFR|CR)-\d+)(?:\*\*)?"
+    r"\s*[:–—]\s*(.+)$"
+)
+# Also accept "FR-N - Title" (space-dash-space) which the strict regex above
+# won't match because the dash is in the bullet-strip prefix group.
+_REQ_HEADER_ALT = re.compile(
+    r"^\s*(?:#{1,6}\s+)?(?:[*\-•●]\s*)?(?:\*\*)?((FR|NFR|CR)-\d+)(?:\*\*)?"
+    r"\s+-\s+(.+)$"
+)
+
 _SUBFIELD = re.compile(
     r"^\s*(?:[○\-*•●]\s*)?(?:\*\*)?"
     r"(Description|Validation Conditions|Role-Based Conditions|"
@@ -28,6 +49,13 @@ _SUBFIELD = re.compile(
     r"(?:\*\*)?\s*:?\s*(.*)$",
     re.IGNORECASE,
 )
+
+# Map requirement-ID prefix to Requirement.type
+_PREFIX_TYPE = {
+    "FR": "Functional",
+    "NFR": "Non-Functional",
+    "CR": "Constraint",
+}
 
 
 def _extract_fr_style(text: str) -> list[Requirement]:
@@ -50,17 +78,35 @@ def _extract_fr_style(text: str) -> list[Requirement]:
             title=current["title"].strip(" *"),
             description=current.get("Description", "").strip() or current["title"].strip(),
             raw_text=raw or current["title"],
+            type=current.get("type", "Functional"),
         ))
 
     for line in lines:
-        m = _FR_HEADER.match(line)
-        if m:
+        # --- Section heading ends the current requirement cleanly ---
+        if _SECTION_HEADING.match(line):
             flush()
-            current = {"id": m.group(1), "title": m.group(2)}
+            current = None
             current_field = None
             continue
+
+        # --- New requirement header ---
+        m = _REQ_HEADER.match(line) or _REQ_HEADER_ALT.match(line)
+        if m:
+            flush()
+            req_id = m.group(1)
+            prefix = m.group(2)
+            title = m.group(3)
+            current = {
+                "id": req_id,
+                "title": title,
+                "type": _PREFIX_TYPE.get(prefix, "Functional"),
+            }
+            current_field = None
+            continue
+
         if current is None:
             continue
+
         sm = _SUBFIELD.match(line)
         if sm:
             current_field = sm.group(1)
@@ -76,7 +122,10 @@ def _extract_fr_style(text: str) -> list[Requirement]:
             current_field = key
             current[current_field] = sm.group(2)
             continue
-        if current_field and line.strip():
+            
+        if line.strip():
+            if current_field is None:
+                current_field = "Description"
             current[current_field] = current.get(current_field, "") + " " + line.strip()
 
     flush()
