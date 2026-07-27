@@ -43,3 +43,77 @@
 2026-07-27 09:07:28,089 - app.agents.qa_artifact_generator_agent - INFO - llm start
 2026-07-27 09:07:33,601 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
 2026-07-27 09:07:33,604 - app.agents.qa_artifact_generator_agent - INFO - llm end
+2026-07-27 17:44:21,547 - httpx - INFO - HTTP Request: POST https://sdrtzewyfligeujghcvk.supabase.co/storage/v1/object/requirement-documents/JOB-2273822BB3/Telehealth%20Appointment%20System%20V1%20(1).pdf "HTTP/2 200 OK"
+2026-07-27 17:49:05,392 - httpx - INFO - HTTP Request: GET https://sdrtzewyfligeujghcvk.supabase.co/storage/v1/object/requirement-documents/JOB-2273822BB3/Telehealth%20Appointment%20System%20V1%20(1).pdf "HTTP/2 200 OK"
+2026-07-27 17:49:07,671 - numexpr.utils - INFO - NumExpr defaulting to 10 threads.
+2026-07-27 17:49:14,434 - docling.datamodel.document - INFO - detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-07-27 17:49:14,463 - docling.document_converter - INFO - Going to convert document batch...
+2026-07-27 17:49:14,464 - docling.document_converter - INFO - Initializing pipeline for StandardPdfPipeline with options hash 80a8a1322ca5ef46817c7adbf875fff6
+2026-07-27 17:49:14,473 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2026-07-27 17:49:14,474 - docling.models.factories - INFO - Registered picture descriptions: ['picture_description_vlm_engine', 'vlm', 'api']
+2026-07-27 17:49:14,594 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2026-07-27 17:49:14,602 - docling.models.factories - INFO - Registered ocr engines: ['auto', 'easyocr', 'kserve_v2_ocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2026-07-27 17:49:15,648 - docling.models.stages.ocr.auto_ocr_model - INFO - Auto OCR model selected ocrmac.
+2026-07-27 17:49:15,656 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2026-07-27 17:49:15,659 - docling.models.factories - INFO - Registered layout engines: ['layout_object_detection', 'docling_layout_default', 'docling_experimental_table_crops_layout']
+2026-07-27 17:49:15,664 - docling.utils.accelerator_utils - INFO - Accelerator device: 'mps'
+2026-07-27 17:49:16,003 - httpx - INFO - HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+2026-07-27 17:49:16,887 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2026-07-27 17:49:16,888 - docling.models.factories - INFO - Registered table structure engines: ['docling_tableformer', 'docling_tableformer_v2']
+2026-07-27 17:49:17,122 - httpx - INFO - HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-07-27 17:49:17,141 - docling.utils.accelerator_utils - INFO - Accelerator device: 'mps'
+2026-07-27 17:49:17,683 - docling.pipeline.base_pipeline - INFO - Processing document tmpwovi_m1n.pdf
+2026-07-27 17:49:21,627 - docling.document_converter - INFO - Finished converting document tmpwovi_m1n.pdf in 7.19 sec.
+2026-07-27 17:49:21,957 - app.agents.requirement_intelligence_agent - INFO - llm start
+2026-07-27 17:49:24,488 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 17:49:24,519 - app.agents.requirement_intelligence_agent - INFO - llm end
+2026-07-27 17:49:24,526 - app.agents.qa_artifact_generator_agent - INFO - llm start
+2026-07-27 17:49:29,068 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 17:49:29,072 - app.agents.qa_artifact_generator_agent - INFO - llm end
+2026-07-27 17:51:15,356 - httpx - INFO - HTTP Request: POST https://sdrtzewyfligeujghcvk.supabase.co/storage/v1/object/requirement-documents/JOB-36824ED248/Telehealth%20Appointment%20Systemv2.pdf "HTTP/2 200 OK"
+2026-07-27 17:51:29,214 - httpx - INFO - HTTP Request: GET https://sdrtzewyfligeujghcvk.supabase.co/storage/v1/object/requirement-documents/JOB-36824ED248/Telehealth%20Appointment%20Systemv2.pdf "HTTP/2 200 OK"
+2026-07-27 17:51:29,633 - numexpr.utils - INFO - NumExpr defaulting to 10 threads.
+2026-07-27 17:51:33,616 - docling.datamodel.document - INFO - detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-07-27 17:51:33,635 - docling.document_converter - INFO - Going to convert document batch...
+2026-07-27 17:51:33,636 - docling.document_converter - INFO - Initializing pipeline for StandardPdfPipeline with options hash 80a8a1322ca5ef46817c7adbf875fff6
+2026-07-27 17:51:33,645 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2026-07-27 17:51:33,646 - docling.models.factories - INFO - Registered picture descriptions: ['picture_description_vlm_engine', 'vlm', 'api']
+2026-07-27 17:51:33,764 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2026-07-27 17:51:33,771 - docling.models.factories - INFO - Registered ocr engines: ['auto', 'easyocr', 'kserve_v2_ocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2026-07-27 17:51:34,223 - docling.models.stages.ocr.auto_ocr_model - INFO - Auto OCR model selected ocrmac.
+2026-07-27 17:51:34,231 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2026-07-27 17:51:34,233 - docling.models.factories - INFO - Registered layout engines: ['layout_object_detection', 'docling_layout_default', 'docling_experimental_table_crops_layout']
+2026-07-27 17:51:34,239 - docling.utils.accelerator_utils - INFO - Accelerator device: 'mps'
+2026-07-27 17:51:34,521 - httpx - INFO - HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+2026-07-27 17:51:35,113 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2026-07-27 17:51:35,114 - docling.models.factories - INFO - Registered table structure engines: ['docling_tableformer', 'docling_tableformer_v2']
+2026-07-27 17:51:35,348 - httpx - INFO - HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-07-27 17:51:35,361 - docling.utils.accelerator_utils - INFO - Accelerator device: 'mps'
+2026-07-27 17:51:35,872 - docling.pipeline.base_pipeline - INFO - Processing document tmpzjkkyu_p.pdf
+2026-07-27 17:51:37,505 - docling.document_converter - INFO - Finished converting document tmpzjkkyu_p.pdf in 3.89 sec.
+2026-07-27 17:51:37,833 - app.agents.requirement_intelligence_agent - INFO - llm start
+2026-07-27 17:51:41,712 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 17:51:41,739 - app.agents.requirement_intelligence_agent - INFO - llm end
+2026-07-27 17:51:41,749 - app.agents.qa_artifact_generator_agent - INFO - llm start
+2026-07-27 17:51:49,393 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 17:51:49,399 - app.agents.qa_artifact_generator_agent - INFO - llm end
+2026-07-27 17:52:17,448 - httpx - INFO - HTTP Request: POST https://sdrtzewyfligeujghcvk.supabase.co/storage/v1/object/requirement-documents/JOB-B177CD3B35/Telehealth%20Appointment%20System%20V1%20(1).pdf "HTTP/2 200 OK"
+2026-07-27 17:52:29,774 - httpx - INFO - HTTP Request: GET https://sdrtzewyfligeujghcvk.supabase.co/storage/v1/object/requirement-documents/JOB-B177CD3B35/Telehealth%20Appointment%20System%20V1%20(1).pdf "HTTP/2 200 OK"
+2026-07-27 17:52:29,824 - docling.datamodel.document - INFO - detected formats: [<InputFormat.PDF: 'pdf'>]
+2026-07-27 17:52:29,825 - docling.document_converter - INFO - Going to convert document batch...
+2026-07-27 17:52:29,825 - docling.document_converter - INFO - Initializing pipeline for StandardPdfPipeline with options hash 80a8a1322ca5ef46817c7adbf875fff6
+2026-07-27 17:52:29,826 - docling.models.stages.ocr.auto_ocr_model - INFO - Auto OCR model selected ocrmac.
+2026-07-27 17:52:29,826 - docling.utils.accelerator_utils - INFO - Accelerator device: 'mps'
+2026-07-27 17:52:30,102 - httpx - INFO - HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-layout-heron/revision/main "HTTP/1.1 200 OK"
+2026-07-27 17:52:30,826 - httpx - INFO - HTTP Request: GET https://huggingface.co/api/models/docling-project/docling-models/revision/v2.3.0 "HTTP/1.1 200 OK"
+2026-07-27 17:52:30,829 - docling.utils.accelerator_utils - INFO - Accelerator device: 'mps'
+2026-07-27 17:52:31,337 - docling.pipeline.base_pipeline - INFO - Processing document tmpu75c2waw.pdf
+2026-07-27 17:52:32,144 - docling.document_converter - INFO - Finished converting document tmpu75c2waw.pdf in 2.32 sec.
+2026-07-27 17:52:32,154 - app.agents.requirement_intelligence_agent - INFO - llm start
+2026-07-27 17:52:34,701 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 17:52:34,704 - app.agents.requirement_intelligence_agent - INFO - llm end
+2026-07-27 17:52:34,716 - app.agents.qa_artifact_generator_agent - INFO - llm start
+2026-07-27 17:52:34,765 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 429 Too Many Requests"
+2026-07-27 17:52:34,766 - groq._base_client - INFO - Retrying request to /openai/v1/chat/completions in 2.000000 seconds
+2026-07-27 17:52:45,338 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 17:52:45,344 - app.agents.qa_artifact_generator_agent - INFO - llm end
