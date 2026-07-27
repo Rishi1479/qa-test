@@ -5,3 +5,6 @@ __pycache__/
 storage/
 .pytest_cache/
 *.egg-info/
+
+.venv/
+app.log
