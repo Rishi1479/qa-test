@@ -6,6 +6,5 @@ from app.crud.crud import (
     delete_job,
     list_jobs,
     clear_incremental_data,
-    save_incremental_requirements_and_testcases,
-    save_results
+    save_results,
 )

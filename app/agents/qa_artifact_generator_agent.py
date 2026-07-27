@@ -17,8 +17,6 @@ from app.agents.llm import get_llm
 from app.agents import prompts
 from app.agents.state import GraphState
 from app.config import settings
-from app.database import SessionLocal
-from app.crud.crud import save_incremental_requirements_and_testcases
 from app.schemas.schemas import (
     AcceptanceCriterion,
     CoverageSummary,
@@ -497,23 +495,9 @@ class QAArtifactGeneratorAgent(BaseAgent):
                         _fallback_artifacts(enriched)
                     )
 
-            # Persist incrementally
-            job_id = state.get("job_id")
-            if job_id:
-                try:
-                    with SessionLocal() as db:
-                        save_incremental_requirements_and_testcases(
-                            db=db,
-                            job_id=job_id,
-                            requirements=[e.model_dump() for e in enriched],
-                            test_cases=[tc.model_dump() for tc in test_cases],
-                            run_id=run_id_str,
-                            raw_response=raw_response
-                        )
-                except Exception as exc:
-                    updates.setdefault("errors", []).append(
-                        f"qa_artifact_generator incremental save failed: {exc}"
-                    )
+            # Artifacts (requirements, test_cases, etc.) are no longer
+            # persisted incrementally to Postgres. The persistence_node
+            # will write everything to MongoDB at the end of the pipeline.
 
         updates["scenarios"] = scenarios
         updates["test_cases"] = test_cases

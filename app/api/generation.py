@@ -18,7 +18,7 @@ from app.tools.supabase_tool import supabase_tool
 from app.tools.validation_tool import validate_requirements
 from app.database import SessionLocal
 from app.crud.crud import get_job, get_document_by_job, list_jobs, update_job_status, delete_job, clear_incremental_data
-from app.models.models import TestCase
+
 
 router = APIRouter(tags=["generation"])
 
@@ -189,31 +189,20 @@ def get_enriched_requirements(job_id: str):
 
 @router.get("/jobs/{job_id}/requirements/{req_code}/test-cases")
 def get_test_cases_for_requirement(job_id: str, req_code: str):
-    import uuid
-    from app.models.models import Requirement
-    with SessionLocal() as db:
-        test_cases = db.query(TestCase).join(Requirement).filter(
-            Requirement.job_id == uuid.UUID(job_id),
-            Requirement.req_code == req_code
-        ).all()
-        if not test_cases:
-            raise HTTPException(404, f"No test cases found for job '{job_id}' and req '{req_code}'")
+    results_wrapper = mongodb_tool.get_results(job_id)
+    if not results_wrapper:
+        raise HTTPException(404, f"No results found for job '{job_id}'")
         
-        return [{
-            "test_id": str(t.id),
-            "req_id": t.requirement.req_code,
-            "scenario_id": None,
-            "title": t.title,
-            "type": t.type,
-            "priority": None,
-            "expected_result": t.expected_result,
-            "preconditions": [t.preconditions] if t.preconditions else [],
-            "steps": t.steps,
-            "test_data": t.test_data,
-            "postconditions": [t.postconditions] if t.postconditions else [],
-            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
-            "langsmith_run_id": t.langsmith_run_id,
-        } for t in test_cases]
+    results = results_wrapper.get("results", {})
+    all_tc = results.get("test_cases", [])
+    
+    # Filter test cases belonging to this req_id
+    test_cases = [tc for tc in all_tc if tc.get("req_id") == req_code]
+    
+    if not test_cases:
+        raise HTTPException(404, f"No test cases found for job '{job_id}' and req '{req_code}'")
+        
+    return test_cases
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +213,8 @@ def get_test_cases_for_requirement(job_id: str, req_code: str):
 
 @router.get("/jobs/{job_id}/download")
 def download_job(job_id: str, fmt: str = "json"):
-    with SessionLocal() as db:
-        results = get_results(db, job_id)
+    results_wrapper = mongodb_tool.get_results(job_id)
+    results = results_wrapper.get("results") if results_wrapper else None
     if not results:
         raise HTTPException(404, f"No results yet for job '{job_id}'. Run /generate first.")
 
@@ -255,8 +244,8 @@ def download_job(job_id: str, fmt: str = "json"):
 @router.get("/json/{job_id}")
 def get_json(job_id: str):
     """Return the structured JSON output for a completed analysis."""
-    with SessionLocal() as db:
-        results = get_results(db, job_id)
+    results_wrapper = mongodb_tool.get_results(job_id)
+    results = results_wrapper.get("results") if results_wrapper else None
     if not results:
         raise HTTPException(404, f"No results for job '{job_id}'. Run /generate first.")
     import json
@@ -270,8 +259,8 @@ def get_json(job_id: str):
 @router.get("/markdown/{job_id}")
 def get_markdown(job_id: str):
     """Return the Markdown report for a completed analysis."""
-    with SessionLocal() as db:
-        results = get_results(db, job_id)
+    results_wrapper = mongodb_tool.get_results(job_id)
+    results = results_wrapper.get("results") if results_wrapper else None
     if not results:
         raise HTTPException(404, f"No results for job '{job_id}'. Run /generate first.")
     md = results.get("markdown_report") or to_markdown(results)
